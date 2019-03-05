@@ -76,6 +76,7 @@ export interface RegisterOptions {
     logger?: Logger
     transport: () => Promise<LSPConnection> | LSPConnection
     documentSelector: DocumentSelector
+    initializationOptions?: (url: URL) => any
 }
 export async function register({
     sourcegraph,
@@ -87,6 +88,7 @@ export async function register({
     afterInitialize = noop,
     transport: createConnection,
     documentSelector,
+    initializationOptions,
 }: RegisterOptions): Promise<LSPClient> {
     const subscriptions = new Subscription()
     // tslint:disable-next-line:no-object-literal-type-assertion
@@ -153,7 +155,10 @@ export async function register({
         }
     }
 
-    async function connect(clientRootUri: URL | null, initParams: InitializeParams): Promise<LSPConnection> {
+    async function connect(
+        clientRootUri: URL | null,
+        initParams: InitializeParams & { originalRootUri: string | null }
+    ): Promise<LSPConnection> {
         const subscriptions = new Subscription()
         const decorationType = sourcegraph.app.createDecorationType()
         const connection = await createConnection()
@@ -265,6 +270,12 @@ export async function register({
         clientRootUri: URL | null,
         initParams: InitializeParams
     ): Promise<void> {
+        // total hack
+        if (initParams.initializationOptions && clientRootUri) {
+            initParams.initializationOptions = initParams.initializationOptions(clientRootUri)
+        } else {
+            console.log('Garr, did not work', initParams.initializationOptions, clientRootUri)
+        }
         const initializeResult = await connection.sendRequest(InitializeRequest.type, initParams)
         // Tell language server about all currently open text documents under this root
         syncTextDocuments(connection)
@@ -292,6 +303,8 @@ export async function register({
                 rootUri: null,
                 capabilities: clientCapabilities,
                 workspaceFolders: sourcegraph.workspace.roots.map(toLSPWorkspaceFolder({ clientToServerURI })),
+                originalRootUri: null,
+                initializationOptions,
             }
         )
         subscriptions.add(connection)
@@ -359,8 +372,10 @@ export async function register({
                 {
                     processId: null,
                     rootUri: serverRootUri.href,
+                    originalRootUri: serverRootUri.href,
                     capabilities: clientCapabilities,
                     workspaceFolders: null,
+                    initializationOptions,
                 }
             )
             subscriptions.add(connection)
@@ -380,9 +395,11 @@ export async function register({
                             new URL(root.uri.toString()),
                             {
                                 processId: null,
+                                originalRootUri: serverRootUri.href,
                                 rootUri: serverRootUri.href,
                                 capabilities: clientCapabilities,
                                 workspaceFolders: null,
+                                initializationOptions,
                             }
                         )
                         subscriptions.add(connection)
